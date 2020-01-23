@@ -1,5 +1,3 @@
-## Gradient Bidding
-
 ```
 ███████╗ ██████╗ ██████╗     █████╗ ██╗
 ██╔════╝██╔═══██╗██╔══██╗   ██╔══██╗██║
@@ -9,12 +7,14 @@
 ╚═╝      ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═╝
 ```
 
+# Gradient Bidding
+
 ## TL;DR
 Conditional computation as a payoff maximization problem.
 
 ## Motivation
 
-Various things including p2p networks.
+Various experiments exploring the possibilities of coordinating multiple, decentralized machine learning models in a peer-to-peer setting.
 
 ---
 
@@ -32,12 +32,14 @@ Various things including p2p networks.
 ## Run
 
 To run this, there are two options:
+
 **Option 1**: Clone the repository, set up a `virtualevn`, and open Jupyter Notebook
 ```
 git clone https://github.com/unconst/GradientBidding.git
 virtualenv env && source env/bin/activate && pip install -r requirements.txt
 $ jupyter notebook
 ```
+
 **Option #2**: Open one of the notebooks in Google Colab
 
 | **Notebook Name**    | **Google Colab Link**                                                                                                                                                           |
@@ -50,4 +52,4 @@ $ jupyter notebook
 ---
 
 ## TODO 
-(const) most things.
+See the [Issues](https://github.com/unconst/GradientBidding/issues) page for proposed improvements, changes, and bug fixes. If you are interested in contributing to GradientBidding, feel free to submit a [Pull Request](https://github.com/unconst/GradientBidding/pulls)
