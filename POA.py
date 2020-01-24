@@ -125,8 +125,12 @@ def alloc(mode, hessians, alphas, hparams):
 
 
 def trial(hparams):
-    # Build Hessian of the loss for each component.
+    # Hessians: H: The hessian of the loss w.r.t a change in weights.
+    # via second order taylor series approximation. First term is 0 at convergence.
+    # Second term is parameterized by the Hessian term.
+    # ∆L = M^t * H * M
     print ('Hessians: H')
+    print ('∆L = M^t * H * M')
     hessians = []
     for i in range(hparams.n_nodes):
         h_i = numpy.random.randn(hparams.n_nodes, hparams.n_nodes)
@@ -137,7 +141,10 @@ def trial(hparams):
         hessians.append(h_i)
     print ('')
 
+    # Alphas: A: The trade off between optimizing Utility vs optimizing for
+    # ranking. P = αU + (1- α)R
     print ('Alphas: A')
+    print ('P = αU + (1- α)R')
     alphas = numpy.random.randn(hparams.n_nodes)
     alphas = (alphas - numpy.min(alphas))/numpy.ptp(alphas)
     print (alphas)
@@ -149,14 +156,6 @@ def trial(hparams):
     # Run competitive weight convergence.
     comp_output = alloc('competitive', hessians, alphas, hparams)
 
-    print ('Coordinated Mask: M')
-    print (coord_output['M'])
-    print ('')
-
-    print ('Competitive Mask: M')
-    print (comp_output['M'])
-    print ('')
-
     print ('Coordinated Weights: W')
     print (coord_output['W'])
     print ('')
@@ -165,44 +164,64 @@ def trial(hparams):
     print (comp_output['W'])
     print ('')
 
+    print ('Coordinated Mask: M')
+    print ('M = σ ( W - avg(W) )')
+    print (coord_output['M'])
+    print ('')
+
+    print ('Competitive Mask: M')
+    print ('M = σ ( W - avg(W) )')
+    print (comp_output['M'])
+    print ('')
+
     print ('Coordinated Interranking: Q')
+    print ('Q = (I - W + Wdg)')
     print (coord_output['Q'])
     print ('')
 
     print ('Competitve Interranking: Q')
+    print ('Q = (I - W + Wdg)')
     print (comp_output['Q'])
     print ('')
 
     print ('Coordinated Divergence: D')
+    print ('D = KL ( Q, avg(Q) )')
     print (coord_output['D'])
     print ('')
 
     print ('Competitive Divergence: D')
+    print ('D = KL ( Q, avg(Q) )')
     print (comp_output['D'])
     print ('')
 
     print ('Coordinated Ranking: R')
+    print ('softmax( Q * Wdg)')
     print (coord_output['R'])
     print ('')
 
     print ('Competitive Ranking: R')
+    print ('softmax( Q * Wdg)')
     print (comp_output['R'])
     print ('')
 
     print ('Coordinated Utility: U')
+    print ('U = M^t * H * M')
     print (coord_output['U'])
     print ('')
 
     print ('Competitive Utility: U')
+    print ('U = M^t * H * M')
     print (comp_output['U'])
     print ('')
 
     print ('Coordinated Payoff: P')
+    print ('P = A * U + (1 - A) * R')
     print (coord_output['P'])
     print ('Avg:' + str(sum(coord_output['P'])/hparams.n_nodes))
     print ('')
 
     print ('Competitive Payoff: P')
+    print ('P = A * U + (1 - A) * R')
     print (comp_output['P'])
     print ('Avg:' + str(sum(comp_output['P'])/hparams.n_nodes))
     print ('')
