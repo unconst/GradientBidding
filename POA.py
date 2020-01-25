@@ -44,8 +44,8 @@ def alloc(mode, hessians, alphas, hparams):
 
         # Mask: M: The mask to apply over inputs F.
         # Q = [n x n]
-        shift = tf.reduce_mean(Q, axis=1)
-        M = tf.nn.relu6(Q - shift)
+        shift = tf.reduce_mean(W, axis=1)
+        M = tf.nn.relu6(W - shift)
 
         # Loss: L: The change to each loss effected by the Mask.
         # L = [n]
@@ -65,13 +65,14 @@ def alloc(mode, hessians, alphas, hparams):
         D = tf.nn.softmax(tf.reshape(cross_entropy, [n]))
 
         # Utility: U: The utility gained or lost via the loss.
-        U = tf.pow(L, 2)
+        U = tf.log(L + 1)
 
         # Ranking: R : The ranking score.
         R = tf.nn.softmax(tf.linalg.tensor_diag_part(Q * W_dg))# , ord=1, axis=0)[0]
 
         # Payoff: P: U + R - D
-        P =  U #* alphas + R * (1 - alphas) * 0.001 # - D
+        #P =  U #* alphas + R * (1 - alphas) * 0.001 # - D
+        P = U * alphas + R * (1 - alphas)
 
         ### Bellow Optimization.
 
