@@ -42,11 +42,10 @@ def alloc(mode, hessians, alphas, hparams):
         Q = tf.linalg.inv(tf.eye(hparams.n_nodes) - W + W_dg)
         Q = tf.linalg.normalize(Q, ord=1, axis=1)[0]
 
-
         # Mask: M: The mask to apply over inputs F.
         # Q = [n x n]
-        shift = tf.reduce_mean(W, axis=1)
-        M = tf.nn.sigmoid(W - shift)
+        shift = tf.reduce_mean(Q, axis=1)
+        M = tf.nn.relu6(Q - shift)
 
         # Loss: L: The change to each loss effected by the Mask.
         # L = [n]
@@ -56,7 +55,6 @@ def alloc(mode, hessians, alphas, hparams):
             m_i = tf.transpose(tf.slice(M, [i, 0], [1, -1])) # n x 1
             temp = tf.matmul(h_i, m_i) # n x 1
             l_i = tf.reshape(tf.reduce_sum(0.5 * temp * m_i), [1])
-            #l_i = tf.Print(l_i, [l_i, temp, m_i, h_i], summarize=10000)
             l_list.append(l_i)
         L = tf.concat(l_list, axis=0)
 
@@ -64,16 +62,16 @@ def alloc(mode, hessians, alphas, hparams):
         # D = [n]
         Q_avg = tf.reshape(tf.tile(tf.reduce_mean(Q, axis=0), [n]), [n,n])
         cross_entropy = -tf.reduce_sum(tf.multiply(Q_avg, tf.log(Q)), axis=1)
-        D = hparams.gamma * tf.reshape(cross_entropy, [n])
+        D = tf.nn.softmax(tf.reshape(cross_entropy, [n]))
 
         # Utility: U: The utility gained or lost via the loss.
-        U = L
+        U = tf.pow(L, 2)
 
         # Ranking: R : The ranking score.
         R = tf.nn.softmax(tf.linalg.tensor_diag_part(Q * W_dg))# , ord=1, axis=0)[0]
 
         # Payoff: P: U + R - D
-        P =  U * alphas + R * (1 - alphas) # - D
+        P =  U #* alphas + R * (1 - alphas) * 0.001 # - D
 
         ### Bellow Optimization.
 
@@ -123,6 +121,17 @@ def alloc(mode, hessians, alphas, hparams):
         # Return metrics.
         return output
 
+def kl(p, q):
+    """Kullback-Leibler divergence D(P || Q) for discrete distributions
+    Parameters
+    ----------
+    p, q : array-like, dtype=float, shape=n
+    Discrete probability distributions.
+    """
+    p = numpy.asarray(p, dtype=numpy.float)
+    q = numpy.asarray(q, dtype=numpy.float)
+
+    return numpy.sum(numpy.where(p != 0, p * numpy.log(p / q), 0))
 
 def trial(hparams):
     # Hessians: H: The hessian of the loss w.r.t a change in weights.
@@ -224,6 +233,18 @@ def trial(hparams):
     print ('P = A * U + (1 - A) * R')
     print (comp_output['P'])
     print ('Avg:' + str(sum(comp_output['P'])/hparams.n_nodes))
+    print ('')
+
+    divergence = kl(coord_output['R'], comp_output['R'])
+    print ('Ranking KL Divergence: ' + str(divergence))
+    print ('')
+
+    coord_sparsity = numpy.count_nonzero(coord_output['M'])/coord_output['M'].size
+    print ('Coordinated Mash Sparsity: ' + str(coord_sparsity))
+    print ('')
+
+    comp_sparsity = numpy.count_nonzero(comp_output['M'])/comp_output['M'].size
+    print ('Competitive Mask Sparsity: ' + str(comp_sparsity))
     print ('')
 
     poa = sum(comp_output['P']) / sum(coord_output['P'])
