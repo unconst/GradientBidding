@@ -5,7 +5,7 @@ import types
 import random
 import numpy
 from numpy import linalg as LA
-numpy.set_printoptions(precision=3, suppress=True)
+numpy.set_printoptions(precision=4, suppress=True)
 
 
 def alloc(mode, hessians, alphas, hparams):
@@ -32,20 +32,10 @@ def alloc(mode, hessians, alphas, hparams):
         W_sig = tf.sigmoid(W_concat) # Force onto [0,1]
         W = tf.linalg.normalize(W_sig, ord=1, axis=1)[0] # Sum to 1.
 
-        # Weights_diag: W_dg: Matrix of W's main diagonal. a.k.a self-contribution.
-        # W_dg = [n x n]
-        W_dg = tf.matrix_set_diag(tf.zeros((n,n)), tf.linalg.tensor_diag_part(W), k = 0)
-
-        # Interranking: Q: The inter-model ranking derived from the weights.
-        # Q = [n x n]
-        # We use the infinite series absorbing markov chain calculation.
-        Q = tf.linalg.inv(tf.eye(hparams.n_nodes) - W + W_dg)
-        Q = tf.linalg.normalize(Q, ord=1, axis=1)[0]
-
         # Mask: M: The mask to apply over inputs F.
         # Q = [n x n]
-        shift = tf.reduce_mean(Q, axis=0)
-        M = tf.nn.relu6(Q - shift)
+        shift = tf.reduce_mean(W, axis=0)
+        M = tf.nn.relu6(W - shift)
 
         # Loss: L: The change to each loss effected by the Mask.
         # L = [n]
@@ -58,23 +48,19 @@ def alloc(mode, hessians, alphas, hparams):
             l_list.append(l_i)
         L = tf.concat(l_list, axis=0)
 
-        # Divergence score: D: Divergence of each ranking from mean.
-        # D = [n]
-        Q_avg = tf.reshape(tf.tile(tf.reduce_mean(Q, axis=0), [n]), [n,n])
-        cross_entropy = -tf.reduce_sum(tf.multiply(Q_avg, tf.log(Q)), axis=1)
-        D = tf.nn.softmax(tf.reshape(cross_entropy, [n]))
-
         # Utility: U: The utility gained or lost via the loss.
-        U = L * 20
+        U = L * 100
 
         # Ranking: R : The ranking score.
-        #R = tf.nn.softmax(tf.linalg.tensor_diag_part(Q * W_dg))# , ord=1, axis=0)[0]
-        #R = tf.nn.softmax(tf.reduce_sum(W, axis=0))
-        R = tf.squeeze(tf.linalg.normalize(tf.reduce_sum(Q, axis=0, keepdims=True), ord=1, axis=1)[0])
+        #W_dg = tf.matrix_set_diag(tf.zeros((n,n)), tf.linalg.tensor_diag_part(W), k = 0)
+        #W = W - W_dg
+        R = tf.squeeze(tf.linalg.normalize(tf.reduce_sum(W, axis=0, keepdims=True), ord=1, axis=1)[0])
 
         # Payoff: P: U + R - D
         #P =  U #* alphas + R * (1 - alphas) * 0.001 # - D
         P = U * alphas + R * (1 - alphas)
+
+        topk = tf.math.top_k(R, k=n, sorted=True)[1]
 
         ### Bellow Optimization.
 
@@ -101,6 +87,8 @@ def alloc(mode, hessians, alphas, hparams):
         # Converge...
         for step in range(hparams.n_steps):
 
+
+
             # Randomly choose participant to optimize
             if mode == 'competitive':
                 step = random.choice(train_steps)
@@ -116,11 +104,14 @@ def alloc(mode, hessians, alphas, hparams):
                                         'P': P,
                                         'U': U,
                                         'R': R,
-                                        'D': D,
                                         'W': W,
                                         'M': M,
-                                        'Q': Q,
+                                        'topk': topk,
                                       })
+
+            print (output['M'])
+            print (output['topk'])
+
         # Return metrics.
         return output
 
@@ -186,16 +177,6 @@ def trial(hparams):
     print (comp_output['M'])
     print ('')
 
-    print ('Coordinated Interranking: Q')
-    print ('Q = (I - W + Wdg)')
-    print (coord_output['Q'])
-    print ('')
-
-    print ('Competitve Interranking: Q')
-    print ('Q = (I - W + Wdg)')
-    print (comp_output['Q'])
-    print ('')
-
     # Alphas: A: The trade off between optimizing Utility vs optimizing for
     # ranking. P = αU + (1- α)R
     print ('Alphas: A')
@@ -203,23 +184,13 @@ def trial(hparams):
     print (alphas)
     print ('')
 
-    print ('Coordinated Divergence: D')
-    print ('D = KL ( Q, avg(Q) )')
-    print (coord_output['D'])
-    print ('')
-
-    print ('Competitive Divergence: D')
-    print ('D = KL ( Q, avg(Q) )')
-    print (comp_output['D'])
-    print ('')
-
     print ('Coordinated Ranking: R')
-    print ('softmax( Q * Wdg)')
+    print ('softmax(sum(W, axis=0))')
     print (coord_output['R'])
     print ('')
 
     print ('Competitive Ranking: R')
-    print ('softmax( Q * Wdg)')
+    print ('softmax(sum(W, axis=0))')
     print (comp_output['R'])
     print ('')
 
@@ -243,6 +214,12 @@ def trial(hparams):
     print ('P = A * U + (1 - A) * R')
     print (comp_output['P'])
     print ('Avg:' + str(sum(comp_output['P'])/hparams.n_nodes))
+    print ('')
+
+    print ('Coordinated sorted: ' + str(coord_output['topk']))
+    print ('')
+
+    print ('Competitve sorted: ' + str(comp_output['topk']))
     print ('')
 
     divergence = kl(coord_output['R'], comp_output['R'])
@@ -291,16 +268,6 @@ if __name__ == "__main__":
         default=10,
         type=int,
         help="Number of nodes to simulate.")
-    parser.add_argument(
-        '--contrib_factor',
-        default=1,
-        type=float,
-        help="Multiplicative factor over contribution")
-    parser.add_argument(
-        '--gamma',
-        default=0.5,
-        type=float,
-        help="Divergence cost hyperparameter")
 
     hparams = parser.parse_args()
 
