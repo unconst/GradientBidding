@@ -101,8 +101,8 @@ def alloc(mode, hessians, init_weights, alphas, hparams):
         session.run(tf.global_variables_initializer())
 
 
-        if mode == 'competitive':
-            hparams.max_steps = hparams.max_steps * 10
+#        if mode == 'competitive':
+#            hparams.max_steps = hparams.max_steps * 10
 
 
         for step_i in range(hparams.max_steps):
