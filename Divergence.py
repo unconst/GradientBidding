@@ -50,7 +50,12 @@ def alloc(mode, hessians, alphas, hparams):
         # Mask: M: The mask to apply over inputs F.
         # Q = [n x n]
         shift = tf.reduce_mean(W, axis=0)
-        M = tf.clip_by_value(tf.nn.relu(W - shift)*10, 0, 1)
+        #M = tf.nn.sigmoid(W - shift)
+        x = W - shift
+        sigmoid = 1 / ( 1 + tf.math.exp(-x))
+        M = sigmoid
+        #M = tf.clip_by_value(sigmoid, 0, 1)
+        #M = tf.clip_by_value(tf.nn.relu(W - shift)*10, 0, 1)
 
         # Loss: L: The change to each loss effected by the Mask.
         # L = [n]
@@ -79,48 +84,33 @@ def alloc(mode, hessians, alphas, hparams):
         RR = tf.div(tf.subtract(QQ, tf.reduce_min(QQ)), tf.subtract(tf.reduce_max(QQ), tf.reduce_min(QQ)))
         R = tf.squeeze(tf.linalg.normalize(RR, ord=1, axis=1)[0])
 
-        # Payoff: P: U + R - D
-        #P =  U #* alphas + R * (1 - alphas) * 0.001 # - D
-        P = U + R
+        # Sorted Ranking
+        topk = tf.math.top_k(R, k=n, sorted=True)[1]
 
         ### Bellow Optimization.
 
         # Bidders move in the direction of the gradient of the Payoff.
         optimizer = tf.train.AdamOptimizer(hparams.learning_rate)
 
-        # Mode == Competitive: All nodes optimize only their local payoff.
-        train_steps = []
         if mode == 'competitive':
-            for i in range(hparams.n_nodes):
-                p_i = tf.slice(P, [i], [1])
-                w_i = w_list[i]
-                grads_and_vars_i = optimizer.compute_gradients(loss=-p_i, var_list=[w_i])
-                train_steps.append(optimizer.apply_gradients(grads_and_vars_i))
+            P = U * hparams.alpha + R
 
-        # Mode == Coordinated: Coordinated nodes optimize the aggregated payoff
         elif mode == 'coordinated':
-            PP = U
-            grads_and_vars = optimizer.compute_gradients(loss=-tf.reduce_mean(PP), var_list=w_list)
-            train_steps.append(optimizer.apply_gradients(grads_and_vars))
+            P = U * hparams.alpha
+
+        grads_and_vars = optimizer.compute_gradients(loss=-tf.reduce_mean(P), var_list=w_list)
+        train_step = optimizer.apply_gradients(grads_and_vars)
 
         # Init the graph.
         session.run(tf.global_variables_initializer())
 
         # Converge...
-        for step in range(hparams.n_steps):
-
-            # Randomly choose participant to optimize
-            if mode == 'competitive':
-                step = random.choice(train_steps)
-
-            # Optimize all participants.
-            elif mode == 'coordinated':
-                step = train_steps[0]
+        for step_i in range(hparams.n_steps):
 
             # Run graph.
             output = session.run(fetches =
                                       {
-                                        'step': step,
+                                        'step': train_step,
                                         'P': P,
                                         'U': U,
                                         'R': R,
@@ -128,7 +118,14 @@ def alloc(mode, hessians, alphas, hparams):
                                         'W': W,
                                         'M': M,
                                         'Q': Q,
+                                        'topk': topk,
                                       })
+
+            if step_i % 500 == 0:
+                print (output['M'])
+                print (output['topk'])
+
+
         # Return metrics.
         return output
 
@@ -153,7 +150,7 @@ def make_hessians(n, size):
     assert(n > 0)
     hessians = []
     for i in range(n):
-        h_i = numpy.random.randn(size, size)
+        h_i = numpy.random.randn(size, size) + 0
         h_i = (h_i - numpy.min(h_i))/numpy.ptp(h_i)
         h_i = h_i/h_i.sum(axis=1, keepdims=1)
         hessians.append(h_i)
@@ -272,7 +269,7 @@ def trial(hparams):
     print ('')
 
     print ('Coordinated Payoff: P')
-    print ('P = U + R')
+    print ('P = U')
     print (coord_output['P'])
     print ('Avg:' + str(sum(coord_output['P'])/hparams.n_nodes))
     print ('')
@@ -291,21 +288,14 @@ def trial(hparams):
     print ('Competitive Mask Sparsity: ' + str(comp_sparsity))
     print ('')
 
-    ideal_rank = idealized_ranking(hparams, hessians)
-    print (ideal_rank)
+    #ideal_rank = idealized_ranking(hparams, hessians)
+    #print (ideal_rank)
     print (comp_output['R'])
     print (coord_output['R'])
 
-    print (numpy.argsort(ideal_rank))
+    #print (numpy.argsort(ideal_rank))
     print (numpy.argsort(comp_output['R']))
     print (numpy.argsort(coord_output['R']))
-
-    divergence1 = kl(ideal_rank, comp_output['R'])
-    print ('Ranking KL Divergence: ' + str(divergence1))
-    print ('')
-
-
-
 
 
 
@@ -326,6 +316,12 @@ if __name__ == "__main__":
         default=1,
         type=int,
         help="Number of trials to run.")
+
+    parser.add_argument(
+        '--alpha',
+        default=1.0,
+        type=float,
+        help="Alpha range.")
     parser.add_argument(
         '--n_steps',
         default=1000,
