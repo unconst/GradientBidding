@@ -5,6 +5,7 @@ import types
 import random
 import numpy
 from numpy import linalg as LA
+import math
 numpy.set_printoptions(precision=3, suppress=True)
 
 
@@ -72,9 +73,11 @@ def alloc(mode, hessians, alphas, hparams):
         U = tf.multiply(A, L)
 
         # Ranking: R : The ranking score.
-        #R = tf.nn.softmax(tf.linalg.tensor_diag_part(Q * W_dg))# , ord=1, axis=0)[0]
+        #R = tf.nn.softmax(tf.linalg.tensor_diag_part(Q * W_dg)) , ord=1, axis=0)[0]
         #R = tf.nn.softmax(tf.reduce_sum(W, axis=0))
-        R = tf.squeeze(tf.linalg.normalize(tf.reduce_sum(Q, axis=0, keepdims=True), ord=1, axis=1)[0])
+        QQ = tf.reduce_sum(Q, axis=0, keepdims=True)
+        RR = tf.div(tf.subtract(QQ, tf.reduce_min(QQ)), tf.subtract(tf.reduce_max(QQ), tf.reduce_min(QQ)))
+        R = tf.squeeze(tf.linalg.normalize(RR, ord=1, axis=1)[0])
 
         # Payoff: P: U + R - D
         #P =  U #* alphas + R * (1 - alphas) * 0.001 # - D
@@ -96,7 +99,8 @@ def alloc(mode, hessians, alphas, hparams):
 
         # Mode == Coordinated: Coordinated nodes optimize the aggregated payoff
         elif mode == 'coordinated':
-            grads_and_vars = optimizer.compute_gradients(loss=-tf.reduce_mean(P), var_list=w_list)
+            PP = U
+            grads_and_vars = optimizer.compute_gradients(loss=-tf.reduce_mean(PP), var_list=w_list)
             train_steps.append(optimizer.apply_gradients(grads_and_vars))
 
         # Init the graph.
@@ -138,38 +142,78 @@ def kl(p, q):
     p = numpy.asarray(p, dtype=numpy.float)
     q = numpy.asarray(q, dtype=numpy.float)
 
-    return numpy.sum(numpy.where(p != 0, p * numpy.log(p / q), 0))
+    return numpy.sum(numpy.where(p != 0, p * numpy.log(p / (q + 0.0001)), 0))
+
+# Hessians: H: The hessian of the loss w.r.t a change in weights.
+# via second order taylor series approximation. First term is 0 at convergence.
+# Second term is parameterized by the Hessian term.
+# ∆L = M^t * H * M
+def make_hessians(n, size):
+    assert(size > 1)
+    assert(n > 0)
+    hessians = []
+    for i in range(n):
+        h_i = numpy.random.randn(size, size)
+        h_i = (h_i - numpy.min(h_i))/numpy.ptp(h_i)
+        h_i = h_i/h_i.sum(axis=1, keepdims=1)
+        hessians.append(h_i)
+    return hessians
+
+# Alphas: A: The trade off between optimizing Utility vs optimizing for
+# ranking. P = α M * H * M + R
+def make_alphas(n):
+    alphas = numpy.random.randn(n)
+    alphas = (alphas - numpy.min(alphas))/numpy.ptp(alphas)
+    return alphas
+
+def softmax(scores):
+    zeta = 0
+    for s in scores:
+        zeta += math.exp(s)
+    softmax = []
+    for s in scores:
+        softmax.append(math.exp(s)/zeta)
+    return softmax
+
+def idealized_ranking(hparams, hessians):
+    scores = []
+    for i in range(hparams.n_nodes):
+        score_i = 0
+        delta_i = -numpy.eye(hparams.n_nodes)[i,:]
+        for h_j in hessians:
+            score_i += numpy.dot(delta_i, numpy.matmul(h_j, delta_i))
+        scores.append(score_i)
+    scores = numpy.asarray(scores)
+    scores = (scores - numpy.min(scores))/numpy.ptp(scores)
+    print (scores)
+    scores = scores/numpy.sum(scores)
+    return scores
+
+
+def dcg_at_k(r, k):
+    r = numpy.asfarray(r)[:k]
+    if r.size:
+        return numpy.sum(numpy.subtract(numpy.power(2, r), 1) / numpy.log2(numpy.arange(2, r.size + 2)))
+    return 0.
+
+
+def ndcg_at_k(r, k):
+    idcg = dcg_at_k(sorted(r, reverse=True), k)
+    if not idcg:
+        return 0.
+    return dcg_at_k(r, k) / idcg
+
 
 def trial(hparams):
     # Hessians: H: The hessian of the loss w.r.t a change in weights.
-    # via second order taylor series approximation. First term is 0 at convergence.
-    # Second term is parameterized by the Hessian term.
-    # ∆L = M^t * H * M
-    print ('Hessians: H')
-    print ('∆L = M^t * H * M')
-    hessians = []
-    for i in range(hparams.n_nodes):
-        h_i = numpy.random.randn(hparams.n_nodes, hparams.n_nodes)
-        h_i = (h_i - numpy.min(h_i))/numpy.ptp(h_i)
-        h_i = h_i/h_i.sum(axis=1, keepdims=1)
-        print (h_i)
-        print ('')
-        hessians.append(h_i)
-    print ('')
+    hessians = make_hessians(hparams.n_nodes, hparams.n_nodes)
 
-    # Alphas: A: The trade off between optimizing Utility vs optimizing for
-    # ranking. P = αU + (1- α)R
-    print ('Alphas: A')
-    print ('P = αU + (1- α)R')
-    alphas = numpy.random.randn(hparams.n_nodes)
-    alphas = (alphas - numpy.min(alphas))/numpy.ptp(alphas) * 30
-    print (alphas)
-    print ('')
+    # Alphas: Lipshitz constant of utility.
+    alphas = make_alphas(hparams.n_nodes)
 
     # Run coordinated weight convergence.
     coord_output = alloc('coordinated', hessians, alphas, hparams)
 
-    # Run competitive weight convergence.
     comp_output = alloc('competitive', hessians, alphas, hparams)
 
     print ('Coordinated Weights: W')
@@ -239,10 +283,6 @@ def trial(hparams):
     print ('Avg:' + str(sum(comp_output['P'])/hparams.n_nodes))
     print ('')
 
-    divergence = kl(coord_output['R'], comp_output['R'])
-    print ('Ranking KL Divergence: ' + str(divergence))
-    print ('')
-
     coord_sparsity = numpy.count_nonzero(coord_output['M'])/coord_output['M'].size
     print ('Coordinated Mask Sparsity: ' + str(coord_sparsity))
     print ('')
@@ -251,8 +291,24 @@ def trial(hparams):
     print ('Competitive Mask Sparsity: ' + str(comp_sparsity))
     print ('')
 
-    poa = sum(comp_output['P']) / sum(coord_output['P'])
-    print ('Price of Anarchy: ' + str(poa))
+    ideal_rank = idealized_ranking(hparams, hessians)
+    print (ideal_rank)
+    print (comp_output['R'])
+    print (coord_output['R'])
+
+    print (numpy.argsort(ideal_rank))
+    print (numpy.argsort(comp_output['R']))
+    print (numpy.argsort(coord_output['R']))
+
+    divergence1 = kl(ideal_rank, comp_output['R'])
+    print ('Ranking KL Divergence: ' + str(divergence1))
+    print ('')
+
+
+
+
+
+
 
 def main(hparams):
     for _ in range(hparams.trials):
